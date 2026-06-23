@@ -146,12 +146,6 @@ while True:
         elif mi_mano.es_simbolo_paz():
             print("Paz")
 
-
-
-
-
-
-
     if mi_cara:
         for cara in mi_cara:
             for punto in cara:
