@@ -1,7 +1,11 @@
 from math import radians
 
 import cv2
+from math import radians
+
+import cv2
 import mediapipe as mp
+from PIL.ImageChops import overlay
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import time
@@ -9,6 +13,12 @@ import math
 
 from numpy.ma.core import indices
 
+#definir variables para calibracion
+
+calibrado = False
+muestras_calibracion = []
+tiempo_inicio = time.time()
+fps_anterior = time.time()
 # Definir donde estan los archivos
 ubicacion_modelo_manos = python.BaseOptions(model_asset_path='hand_landmarker.task')
 ubicacion_modelo_cara  = python.BaseOptions(model_asset_path='face_landmarker.task')
@@ -37,6 +47,7 @@ class Funciones_cara:
     def __init__(self, landmarks):
         self.landmarks = landmarks
 
+
     def calcular_distancia(self, punto1, punto2):
         punto1 = self.landmarks[punto1]
         punto2 = self.landmarks[punto2]
@@ -51,9 +62,12 @@ class Funciones_cara:
     def distancia_esquinas_ojos(self):
         return self.calcular_distancia(33, 263)
 
-    def es_sonrisa(self):
-        Radio = self.comisuras_mejillas() /  self.distancia_esquinas_ojos()
-        if (self.comisuras_mejillas() > Radio):
+    def radio_boca(self):
+        radio = self.comisuras_mejillas() /  self.distancia_esquinas_ojos()
+        return radio
+
+    def es_sonrisa(selfs, umbral_sonrisa):
+        if (selfs.radio_boca() > umbral_sonrisa):
             return True
 
 
@@ -97,6 +111,8 @@ class Funciones_mano:
         pulgar_extendido = self.dedo_extendido(4, 0)
         return pulgar_extendido and not any(self.obtener_estado_dedos())
 
+
+
 while True:
     exitoso, frame = camara.read()
     if not exitoso:
@@ -104,6 +120,8 @@ while True:
         break
 
     timestamp = int(time.time() * 1000) #obtener el tiempo actual en milisegundos
+
+
 
     # frame_rgb es una matriz de numpy
     #cambiamos el formato de color acorde a mediapipe
@@ -157,19 +175,64 @@ while True:
 
         mi_carita = Funciones_cara(cara)
 
-        if mi_carita.es_sonrisa():
-            print("Sonrisa :D")
+        if not calibrado:
+            alto, ancho, _ = frame.shape
 
 
+            # Crear el fondo antes del texto
+            overlay = frame.copy()
+            cv2.rectangle(overlay, (0,0), (ancho, alto), (200, 200, 200), -1)
+            frame = cv2.addWeighted(overlay, 0.3, frame, 0.7,0)
+
+            # Crear texto "calibrando"..
+            texto = "***Calibrando...pon un rostro neutral***"
+            (ancho_texto, _), _ = cv2.getTextSize(texto, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+            x_centrado = (ancho - ancho_texto) // 2
+            y_centrado = (alto // 2)
+
+            cv2.putText(
+                frame,
+                texto,
+                (x_centrado, y_centrado),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.0,
+                (0,0,0),
+                2
+            )
+
+            tiempo_actual = time.time()
+            segundos_pasados = tiempo_actual - tiempo_inicio
+
+            # Crear Barra de proceso
+            progreso = min(segundos_pasados / 5, 1.0)
+
+            # Divides los segundos pasados / 3 porque son 3 segundos y tomas el valor mas pequeño hasta que llegue a 1.0, con eso nos aseguramos
+            ancho_barra = int(ancho * progreso)
+            cv2.rectangle(frame, (0, alto - 20), (ancho_barra, alto), (0,255,0), -1)
+
+            ratio_boca = mi_carita.radio_boca()
+            muestras_calibracion.append(ratio_boca)
+
+            if segundos_pasados > 5:
+                sumatoria_de_muestras = sum(muestras_calibracion)
+                promedio_muestras = sumatoria_de_muestras / len(muestras_calibracion)
+                ratio_neutral = promedio_muestras
+                umbral_sonrisa  = ratio_neutral * 1.25 # añadimos un 15% como forma de seguridad para estar seguros del ratio
+                calibrado = True
+        else:
+             if mi_carita.es_sonrisa(umbral_sonrisa):
+                print("Sonrisa :D")
+
+    fps_actual = time.time()
+    if fps_actual - fps_anterior > 0:
+        fps = 1 / (fps_actual - fps_anterior)
+
+        cv2.putText(frame, f"FPS: {int(fps)}",
+                    (10,30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1, (0,255,0),2
+                    )
+    fps_anterior = fps_actual
 
     #abrir ventana y mostrar el fotograma
     cv2.imshow("Mi camara", frame)
-
-    # presionar tecla para salir
-    # 1 es tiempo en ms, osea: 1ms
-    # ord es el codigo numerico de la tecla
-    if cv2.waitKey(1) == ord("q"):
-        break
-camara.release()
-cv2.destroyAllWindows()
-
